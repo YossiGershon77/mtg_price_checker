@@ -212,6 +212,141 @@ export async function getCardPrices(id: string): Promise<CardPriceResponse> {
 }
 
 /**
+ * Fetch a card by Scryfall ID
+ * @param id - Scryfall card ID
+ * @returns Promise with card details including id, name, set, image, and market_price
+ */
+export async function fetchCardById(id: string): Promise<{
+  id: string;
+  name: string;
+  set: string;
+  image: string;
+  market_price: number | null;
+  prices: {
+    usd: number | null;
+    usd_foil: number | null;
+  };
+  collector_number?: string;
+  rarity?: string;
+}> {
+  try {
+    const url = `${SCRYFALL_API_BASE}/cards/${id}`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`Scryfall API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const card: Card = await response.json();
+    
+    // Parse USD market price (could be null, or a string like "1.50")
+    const marketPrice = card.prices.usd ? parseFloat(card.prices.usd) : null;
+    const foilPrice = card.prices.usd_foil ? parseFloat(card.prices.usd_foil) : null;
+    
+    return {
+      id: card.id,
+      name: card.name,
+      set: card.set_name,
+      image: card.image_uris?.normal || card.image_uris?.large || card.image_uris?.small || '',
+      market_price: marketPrice,
+      prices: {
+        usd: marketPrice,
+        usd_foil: foilPrice,
+      },
+      collector_number: card.collector_number,
+      rarity: card.rarity,
+    };
+  } catch (error) {
+    console.error('Error fetching card by ID:', error);
+    throw error;
+  }
+}
+
+/**
+ * Fetch a card by name to get oracle_id, then fetch all prints
+ * @param cardName - The name of the card to search for
+ * @returns Promise with card name, oracle_id, and array of all prints
+ */
+export async function fetchCardPrints(cardName: string): Promise<{
+  name: string;
+  oracle_id: string;
+  prints: Array<{
+    id: string;
+    set_name: string;
+    collector_number: string;
+    rarity: string;
+    image: string;
+    market_price: number | null;
+    foil_price: number | null;
+    finishes: string[]; // ['foil', 'nonfoil'] or just one
+  }>;
+}> {
+  try {
+    // First, search for the card by exact name to get oracle_id
+    const encodedQuery = encodeURIComponent(`!"${cardName}"`);
+    const searchUrl = `${SCRYFALL_API_BASE}/cards/search?q=${encodedQuery}&unique=cards`;
+    
+    const searchResponse = await fetch(searchUrl);
+    
+    if (!searchResponse.ok) {
+      if (searchResponse.status === 404) {
+        throw new Error(`Card not found: ${cardName}`);
+      }
+      throw new Error(`Scryfall API error: ${searchResponse.status} ${searchResponse.statusText}`);
+    }
+    
+    const searchData: ScryfallSearchResponse = await searchResponse.json();
+    
+    if (searchData.data.length === 0) {
+      throw new Error(`Card not found: ${cardName}`);
+    }
+    
+    // Get the first card to extract oracle_id and name
+    const firstCard = searchData.data[0];
+    const oracleId = firstCard.oracle_id;
+    const cardName_final = firstCard.name;
+    
+    // Now fetch ALL prints using oracle_id
+    const printsUrl = `${SCRYFALL_API_BASE}/cards/search?q=oracleid:${oracleId}&unique=prints&order=released&dir=desc`;
+    
+    const printsResponse = await fetch(printsUrl);
+    
+    if (!printsResponse.ok) {
+      throw new Error(`Scryfall API error: ${printsResponse.status} ${printsResponse.statusText}`);
+    }
+    
+    const printsData: ScryfallSearchResponse = await printsResponse.json();
+    
+    // Map all prints to our format
+    const prints = printsData.data.map((card) => {
+      const marketPrice = card.prices.usd ? parseFloat(card.prices.usd) : null;
+      const foilPrice = card.prices.usd_foil ? parseFloat(card.prices.usd_foil) : null;
+      
+      return {
+        id: card.id,
+        set_name: card.set_name,
+        collector_number: card.collector_number,
+        rarity: card.rarity,
+        image: card.image_uris?.normal || card.image_uris?.large || card.image_uris?.small || '',
+        market_price: marketPrice,
+        foil_price: foilPrice,
+        finishes: card.finishes || [],
+      };
+    });
+    
+    return {
+      name: cardName_final,
+      oracle_id: oracleId,
+      prints,
+    };
+  } catch (error) {
+    console.error('Error fetching card prints:', error);
+    throw error;
+  }
+}
+
+/**
  * Fetch a card by name and return its details with USD market price
  * @param cardName - The name of the card to search for
  * @returns Promise with card details including id, name, set, image, and market_price
@@ -226,6 +361,8 @@ export async function fetchCardByName(cardName: string): Promise<{
     usd: number | null;
     usd_foil: number | null;
   };
+  collector_number?: string;
+  rarity?: string;
 }> {
   try {
     // Search for the card by exact name
@@ -264,10 +401,11 @@ export async function fetchCardByName(cardName: string): Promise<{
         usd: marketPrice,
         usd_foil: foilPrice,
       },
+      collector_number: card.collector_number,
+      rarity: card.rarity,
     };
   } catch (error) {
     console.error('Error fetching card by name:', error);
     throw error;
   }
 }
-

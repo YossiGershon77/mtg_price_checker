@@ -15,6 +15,22 @@ export interface Card {
     usd: number | null;
     usd_foil: number | null;
   };
+  collector_number?: string;
+  rarity?: string;
+}
+
+/**
+ * Card Print interface for version selection
+ */
+export interface CardPrint {
+  id: string;
+  set_name: string;
+  collector_number: string;
+  rarity: string;
+  image: string;
+  market_price: number | null;
+  foil_price: number | null;
+  finishes: string[]; // ['foil', 'nonfoil'] or just one
 }
 
 /**

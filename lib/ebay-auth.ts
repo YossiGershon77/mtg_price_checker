@@ -1,76 +1,46 @@
-import 'server-only';
-
 /**
- * eBay OAuth 2.0 Client Credentials flow implementation
- * Handles token acquisition and caching for eBay API authentication
+ * EBAY PRODUCTION AUTH FIX (STRICT)
  */
 
-import { ENV } from './env';
+import "server-only";
 
-const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
-
-interface EbayOAuthResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-}
-
-/**
- * Cached token and expiry timestamp
- */
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
-/**
- * Get eBay OAuth 2.0 access token using Client Credentials flow
- * Implements token caching to avoid unnecessary API calls
- * 
- * @returns Promise<string> - The access token
- */
-export async function getEbayAccessToken(): Promise<string> {
-  // Check if we have a valid cached token
-  const now = Date.now();
-  if (cachedToken && tokenExpiry > now) {
-    return cachedToken;
+export async function getEbayToken() {
+  // 1. Manually pull and CLEAN the keys from .env.local
+  const rawAppId = process.env.EBAY_APP_ID || "";
+  const rawCertId = process.env.EBAY_CERT_ID || "";
+  
+  // .trim() removes any accidental spaces or newlines from the file
+  const appId = rawAppId.trim();
+  const certId = rawCertId.trim();
+
+  // 2. Create the EXACT string eBay expects: "AppID:CertID"
+  const credentialString = `${appId}:${certId}`;
+  
+  // 3. Base64 Encode
+  const encoded = Buffer.from(credentialString).toString('base64');
+
+  const response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${encoded}`,
+      'Accept': 'application/json', // Sometimes required for production
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      scope: 'https://api.ebay.com/oauth/api_scope' // Ensure this is exactly this URL
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    console.error("❌ EBAY AUTH DETAIL:", errorData);
+    return { success: false, error: errorData.error_description };
   }
 
-  // Token expired or doesn't exist, fetch a new one
-  try {
-    // Base64 encode CLIENT_ID:CLIENT_SECRET
-    const credentials = Buffer.from(`${ENV.EBAY_CLIENT_ID}:${ENV.EBAY_CLIENT_SECRET}`).toString('base64');
-
-    const response = await fetch(EBAY_OAUTH_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${credentials}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        scope: 'https://api.ebay.com/oauth/api_scope',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`eBay OAuth error: ${response.status} ${response.statusText} - ${errorText}`);
-    }
-
-    const data: EbayOAuthResponse = await response.json();
-
-    // Cache the token with expiry timestamp (subtract 60 seconds as safety buffer)
-    cachedToken = data.access_token;
-    tokenExpiry = now + (data.expires_in - 60) * 1000; // Convert seconds to milliseconds, subtract 60s buffer
-
-    return cachedToken;
-  } catch (error) {
-    // Clear cache on error
-    cachedToken = null;
-    tokenExpiry = 0;
-    console.error('Error fetching eBay access token:', error);
-    throw error;
-  }
+  const data = await response.json();
+  return { success: true, token: data.access_token };
 }
-
-
-

@@ -6,7 +6,7 @@
  */
 
 import { EbayListing } from '@/types/mtg';
-import { getEbayAccessToken } from '@/lib/ebay-auth';
+import { getEbayToken } from '@/lib/ebay-auth';
 
 const EBAY_API_BASE = 'https://api.ebay.com';
 const EBAY_BROWSE_API = `${EBAY_API_BASE}/buy/browse/v1/item_summary/search`;
@@ -35,17 +35,39 @@ interface EbaySearchResponse {
 /**
  * Search for eBay listings in the MTG category
  * @param searchQuery - Search term for the card name
- * @returns Promise<EbayListing[]> - Array of eBay listings
+ * @param setName - Optional set name to refine search
+ * @param collectorNumber - Optional collector number to refine search
+ * @returns Promise<EbayListing[] | { error: string }> - Array of eBay listings or error object
  */
-export async function searchEbayListings(searchQuery: string): Promise<EbayListing[]> {
+export async function searchEbayListings(
+  searchQuery: string,
+  setName?: string,
+  collectorNumber?: string
+): Promise<EbayListing[] | { error: string }> {
   try {
     // Get access token
-    const accessToken = await getEbayAccessToken();
+    const tokenResult = await getEbayToken();
+    
+    // Check if token request failed
+    if (!tokenResult.success) {
+      return { error: tokenResult.error };
+    }
+    
+    const accessToken = tokenResult.token;
 
+    // Build refined search query with set name and collector number if provided
+    let refinedQuery = searchQuery;
+    if (setName) {
+      refinedQuery += ` ${setName}`;
+    }
+    if (collectorNumber) {
+      refinedQuery += ` ${collectorNumber}`;
+    }
+    
     // Build search URL with MTG category filter
     const searchParams = new URLSearchParams({
       category_ids: MTG_CATEGORY_ID,
-      q: searchQuery,
+      q: refinedQuery,
       limit: '20', // Limit to 20 results
     });
 
@@ -61,8 +83,10 @@ export async function searchEbayListings(searchQuery: string): Promise<EbayListi
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`eBay API error: ${response.status} ${response.statusText} - ${errorText}`);
+      const errorData = await response.json();
+      console.error("❌ EBAY API ERROR:", JSON.stringify(errorData, null, 2));
+      console.log("DEBUG_EBAY_FULL_RESPONSE:", JSON.stringify(errorData, null, 2));
+      return { error: errorData.error_description || `eBay API error: ${response.status} ${response.statusText}` };
     }
 
     const data: EbaySearchResponse = await response.json();
@@ -96,7 +120,7 @@ export async function searchEbayListings(searchQuery: string): Promise<EbayListi
     });
   } catch (error) {
     console.error('Error searching eBay listings:', error);
-    throw error;
+    return { error: error instanceof Error ? error.message : 'Unknown error occurred' };
   }
 }
 
