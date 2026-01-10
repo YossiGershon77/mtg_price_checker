@@ -1,23 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllWatchlistItems, WatchlistItem } from '@/lib/watchlist-storage';
-import { getEbayToken } from '@/lib/ebay-auth';
 import { promises as fs } from 'fs';
 import path from 'path';
 import webpush from 'web-push';
+import { getEbayToken } from '@/lib/ebay-auth';
 
 const EBAY_BROWSE_API = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
 const MTG_CATEGORY_ID = '183454';
 
-interface EbaySearchResponse {
-  itemSummaries?: Array<{
-    itemId: string;
-    title: string;
-    price: {
-      value: string;
-      currency: string;
-    };
-    itemWebUrl: string;
-  }>;
+interface WatchlistItem {
+  id: string;
+  cardName: string;
+  cardId: string;
+  targetPrice: number;
+  scope: 'specific' | 'any';
+  setName?: string;
+  collectorNumber?: string;
+  createdAt: string;
 }
 
 interface Subscription {
@@ -29,52 +27,16 @@ interface Subscription {
   createdAt?: string;
 }
 
-interface NotificationHistory {
-  watchlistItemId: string;
-  lastNotifiedListingId: string;
-  lastNotifiedAt: string;
-}
-
-const NOTIFICATION_HISTORY_FILE = path.join(process.cwd(), 'notification-history.json');
-
-/**
- * Load notification history
- */
-async function loadNotificationHistory(): Promise<Record<string, NotificationHistory>> {
-  try {
-    const data = await fs.readFile(NOTIFICATION_HISTORY_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return {};
-    }
-    console.error('Error reading notification history:', error);
-    return {};
-  }
-}
-
-/**
- * Save notification history
- */
-async function saveNotificationHistory(history: Record<string, NotificationHistory>): Promise<void> {
-  await fs.writeFile(NOTIFICATION_HISTORY_FILE, JSON.stringify(history, null, 2), 'utf-8');
-}
-
-/**
- * Load subscriptions
- */
-async function loadSubscriptions(): Promise<Subscription[]> {
-  try {
-    const subscriptionsFile = path.join(process.cwd(), 'subscriptions.json');
-    const data = await fs.readFile(subscriptionsFile, 'utf-8');
-    return JSON.parse(data);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    console.error('Error reading subscriptions:', error);
-    return [];
-  }
+interface EbaySearchResponse {
+  itemSummaries?: Array<{
+    itemId: string;
+    title: string;
+    price: {
+      value: string;
+      currency: string;
+    };
+    itemWebUrl: string;
+  }>;
 }
 
 /**
@@ -135,7 +97,7 @@ async function sendPushNotification(
   body: string,
   url: string
 ) {
-  // Set VAPID keys (should be in environment variables)
+  // Set VAPID keys
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
 
@@ -165,6 +127,7 @@ async function sendPushNotification(
     if (error.statusCode === 410) {
       console.log('Subscription expired, should be removed');
     }
+    throw error;
   }
 }
 
@@ -174,35 +137,67 @@ async function sendPushNotification(
  */
 export async function GET(request: NextRequest) {
   try {
-    // Optional: Add authentication to prevent unauthorized access
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    // 1. Security: Check if key matches CRON_SECRET
+    const { searchParams } = new URL(request.url);
+    const key = searchParams.get('key');
+  
+    if (key !== process.env.CRON_SECRET) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    // Load watchlist and subscriptions
-    const watchlistItems = await getAllWatchlistItems();
-    const subscriptions = await loadSubscriptions();
-    const notificationHistory = await loadNotificationHistory();
+    // 2. Load Watchlist: Use fs.promises.readFile to read watchlist.json
+    const watchlistFile = path.join(process.cwd(), 'watchlist.json');
+    let watchlistItems: WatchlistItem[] = [];
+
+    try {
+      const watchlistData = await fs.readFile(watchlistFile, 'utf-8');
+      watchlistItems = JSON.parse(watchlistData);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        // File doesn't exist yet, return empty status
+        return NextResponse.json({
+          checked: 0,
+          notified: 0,
+          message: 'No watchlist items found',
+        });
+      }
+      throw error;
+    }
 
     if (watchlistItems.length === 0) {
       return NextResponse.json({
-        message: 'No items in watchlist',
         checked: 0,
         notified: 0,
+        message: 'No watchlist items to check',
       });
+    }
+
+    // Load push subscriptions
+    const subscriptionsFile = path.join(process.cwd(), 'subscriptions.json');
+    let subscriptions: Subscription[] = [];
+
+    try {
+      const subscriptionsData = await fs.readFile(subscriptionsFile, 'utf-8');
+      subscriptions = JSON.parse(subscriptionsData);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return NextResponse.json({
+          checked: 0,
+          notified: 0,
+          message: 'No push subscriptions found',
+        });
+      }
+      throw error;
     }
 
     if (subscriptions.length === 0) {
       return NextResponse.json({
-        message: 'No push notification subscriptions found',
         checked: 0,
         notified: 0,
+        message: 'No push subscriptions found',
       });
     }
 
@@ -210,7 +205,7 @@ export async function GET(request: NextRequest) {
     let notified = 0;
     const errors: string[] = [];
 
-    // Check each watchlist item
+    // 3. eBay Search: For each item in the watchlist, fetch the lowest 'Buy It Now' price
     for (const item of watchlistItems) {
       try {
         checked++;
@@ -235,36 +230,22 @@ export async function GET(request: NextRequest) {
 
         const lowestPrice = parseFloat(lowestListing.price.value);
 
-        // Check if price is below target
-        if (lowestPrice < item.targetPrice) {
-          // Check if we already notified for this listing
-          const historyKey = item.id;
-          const history = notificationHistory[historyKey];
-
-          if (history && history.lastNotifiedListingId === lowestListing.itemId) {
-            // Already notified for this listing, skip
-            continue;
-          }
-
+        // 4. Logic: If the lowest price found is <= the user's target price
+        if (lowestPrice <= item.targetPrice) {
           // Send notification to all subscriptions
           const notificationPromises = subscriptions.map((subscription) =>
             sendPushNotification(
               subscription,
-              `🎯 Sniper Alert: ${item.cardName}`,
-              `Found for $${lowestPrice.toFixed(2)}! Tap to buy.`,
+              `🎯 Deal Found: ${item.cardName}`, // Title: "🎯 Deal Found: [Card Name]"
+              `Now available for $${lowestPrice.toFixed(2)}! Tap to view on eBay.`, // Body: "Now available for $[Price]! Tap to view on eBay."
               lowestListing.itemWebUrl
-            )
+            ).catch((error) => {
+              console.error(`Failed to send notification to subscription:`, error);
+              return null;
+            })
           );
 
           await Promise.allSettled(notificationPromises);
-
-          // Update notification history
-          notificationHistory[historyKey] = {
-            watchlistItemId: item.id,
-            lastNotifiedListingId: lowestListing.itemId,
-            lastNotifiedAt: new Date().toISOString(),
-          };
-
           notified++;
           console.log(`✅ Notified for ${item.cardName} - Price: $${lowestPrice.toFixed(2)}, Target: $${item.targetPrice}`);
         }
@@ -275,11 +256,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Save updated notification history
-    await saveNotificationHistory(notificationHistory);
-
+    // 5. Respond: Return a JSON status of what was checked
     return NextResponse.json({
-      success: true,
       checked,
       notified,
       errors: errors.length > 0 ? errors : undefined,
@@ -288,7 +266,6 @@ export async function GET(request: NextRequest) {
     console.error('Error in check-prices cron:', error);
     return NextResponse.json(
       {
-        success: false,
         error: 'Failed to check prices',
         message: error instanceof Error ? error.message : 'Unknown error',
       },
@@ -296,4 +273,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
