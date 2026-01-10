@@ -51,6 +51,8 @@ export default function Home() {
   const [watchTargetPrice, setWatchTargetPrice] = useState('');
   const [watchScope, setWatchScope] = useState<'specific' | 'any'>('specific');
   const [isSavingWatch, setIsSavingWatch] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [currentView, setCurrentView] = useState<'search' | 'watchlist' | 'history'>('search');
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,6 +266,40 @@ export default function Home() {
     }
   }, [marketData?.card.id]);
 
+  // Check notification permission on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    // Check if serviceWorker and PushManager are supported
+    if (!('serviceWorker' in navigator)) {
+      console.error('Service Worker is not supported');
+      return;
+    }
+
+    if (!('PushManager' in window)) {
+      console.error('PushManager is not supported');
+      return;
+    }
+
+    // Request notification permission
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+
+      if (permission === 'granted') {
+        console.log('Notifications Enabled!');
+      } else if (permission === 'denied') {
+        console.log('Notification permission denied');
+      }
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+    }
+  };
+
   // Get top 5 cheapest listings
   const topListings = marketData
     ? [...marketData.ebayListings]
@@ -440,14 +476,87 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-zinc-900 text-zinc-100">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            MTG Price Tracker
-          </h1>
-          <p className="text-zinc-400">Track Magic: The Gathering card prices across Scryfall and eBay</p>
+      {/* Desktop Top Navigation */}
+      <nav className="hidden md:block bg-zinc-800 border-b border-zinc-700 sticky top-0 z-40">
+        <div className="container mx-auto px-4 max-w-[1400px]">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-1">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                MTG Price Tracker
+              </h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setCurrentView('search')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                  currentView === 'search'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                }`}
+              >
+                🔍 Search
+              </button>
+              <button
+                onClick={() => setCurrentView('watchlist')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                  currentView === 'watchlist'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                }`}
+              >
+                🔔 Watchlist
+              </button>
+              <button
+                onClick={() => setCurrentView('history')}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                  currentView === 'history'
+                    ? 'bg-green-600 text-white'
+                    : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                }`}
+              >
+                📈 History
+              </button>
+              {notificationPermission !== 'granted' && (
+                <button
+                  onClick={handleEnableNotifications}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold text-sm transition-colors text-white"
+                >
+                  🔔 Enable Notifications
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+      </nav>
+
+      <div className="container mx-auto px-4 py-8 max-w-[1400px] pb-20 md:pb-8">
+        {/* Header - Hidden on desktop, shown on mobile */}
+        <div className="mb-8 block md:hidden">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                MTG Price Tracker
+              </h1>
+              <p className="text-zinc-400">Track Magic: The Gathering card prices across Scryfall and eBay</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop Header */}
+        <div className="mb-8 hidden md:block">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                MTG Price Tracker
+              </h1>
+              <p className="text-zinc-400">Track Magic: The Gathering card prices across Scryfall and eBay</p>
+            </div>
+          </div>
+        </div>
+
+        {/* View Content */}
+        {currentView === 'search' && (
+          <>
 
         {/* Search Bar */}
         <form onSubmit={handleSearch} className="mb-8">
@@ -689,19 +798,43 @@ export default function Home() {
             <h2 className="text-2xl font-bold mb-4 text-zinc-100">
               Select Version: {cardName}
             </h2>
-            <div className="space-y-3 max-h-96 overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-h-96 overflow-y-auto">
               {cardPrints.map((print) => {
                 const hasFoil = print.finishes.includes('foil');
                 const hasNonfoil = print.finishes.includes('nonfoil');
                 const canSelectFoil = hasFoil && hasNonfoil;
                 
                 return (
-                  <div key={print.id} className="bg-zinc-900 rounded-lg p-4 border border-zinc-700">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="font-bold text-zinc-100">{print.set_name}</span>
-                          <span className="text-sm text-zinc-400">#{print.collector_number}</span>
+                  <div key={print.id} className="bg-zinc-900 rounded-lg border border-zinc-700 overflow-hidden relative">
+                    {/* Desktop Watch Button - Top Right Floating Icon */}
+                    <button
+                      onClick={() => handleWatchClick(print)}
+                      className="hidden md:block absolute top-2 right-2 z-10 w-8 h-8 bg-yellow-600 hover:bg-yellow-700 rounded-full flex items-center justify-center text-white shadow-lg transition-colors"
+                      title="Watch"
+                    >
+                      🔔
+                    </button>
+
+                    {/* Card Image */}
+                    {print.image && (
+                      <div className="relative aspect-[3/4] w-full bg-zinc-800">
+                        <Image
+                          src={print.image}
+                          alt={`${print.set_name} #${print.collector_number}`}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                        />
+                      </div>
+                    )}
+
+                    {/* Card Info */}
+                    <div className="p-4">
+                      {/* Mobile: Centered Text, Desktop: Left Aligned */}
+                      <div className="text-center md:text-left mb-3">
+                        <div className="flex items-center justify-center md:justify-start gap-2 mb-2 flex-wrap">
+                          <span className="font-bold text-zinc-100 text-sm md:text-base">{print.set_name}</span>
+                          <span className="text-zinc-400 text-sm md:text-base">#{print.collector_number}</span>
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${
                             print.rarity === 'mythic' ? 'bg-purple-600 text-white' :
                             print.rarity === 'rare' ? 'bg-yellow-600 text-white' :
@@ -711,7 +844,7 @@ export default function Home() {
                             {print.rarity.toUpperCase()}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4 text-sm">
+                        <div className="flex items-center justify-center md:justify-start gap-4 text-sm md:text-base flex-wrap">
                           {print.market_price !== null && (
                             <span className="text-zinc-300">
                               Non-Foil: <span className="font-bold text-green-400">${print.market_price.toFixed(2)}</span>
@@ -724,18 +857,22 @@ export default function Home() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleWatchClick(print)}
-                          className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-semibold text-sm transition-colors text-white"
-                        >
-                          🔔 Watch
-                        </button>
+
+                      {/* Mobile Watch Button - Full Width */}
+                      <button
+                        onClick={() => handleWatchClick(print)}
+                        className="md:hidden w-full mb-3 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-semibold text-sm transition-colors text-white"
+                      >
+                        🔔 Watch
+                      </button>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-col md:flex-row gap-2">
                         {hasNonfoil && (
                           <button
                             onClick={() => handleVersionSelect(print, false)}
                             disabled={loading}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors"
+                            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg font-semibold text-sm md:text-base transition-colors"
                           >
                             {loading ? 'Loading...' : 'Select Non-Foil'}
                           </button>
@@ -744,7 +881,7 @@ export default function Home() {
                           <button
                             onClick={() => handleVersionSelect(print, true)}
                             disabled={loading}
-                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors"
+                            className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg font-semibold text-sm md:text-base transition-colors"
                           >
                             {loading ? 'Loading...' : 'Select Foil'}
                           </button>
@@ -1132,27 +1269,88 @@ export default function Home() {
           </div>
         )}
 
-        {/* Empty State */}
-        {!marketData && !loading && !error && (
-          <div className="text-center py-16">
-            <div className="inline-block p-4 bg-zinc-800 rounded-full mb-4">
-              <svg
-                className="w-12 h-12 text-zinc-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
+            {/* Empty State */}
+            {!marketData && !loading && !error && (
+              <div className="text-center py-16">
+                <div className="inline-block p-4 bg-zinc-800 rounded-full mb-4">
+                  <svg
+                    className="w-12 h-12 text-zinc-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                </div>
+                <p className="text-zinc-400 text-lg">Search for a card to see market data</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {currentView === 'watchlist' && (
+          <div className="py-8">
+            <h2 className="text-2xl font-bold mb-4 text-zinc-100">🔔 Watchlist</h2>
+            <div className="bg-zinc-800 rounded-xl p-6 border border-zinc-700">
+              <p className="text-zinc-400">Watchlist view coming soon...</p>
+              <p className="text-zinc-500 text-sm mt-2">Your watched cards will appear here.</p>
             </div>
-            <p className="text-zinc-400 text-lg">Search for a card to see market data</p>
           </div>
         )}
+
+        {currentView === 'history' && (
+          <div className="py-8">
+            <h2 className="text-2xl font-bold mb-4 text-zinc-100">📈 History</h2>
+            <div className="bg-zinc-800 rounded-xl p-6 border border-zinc-700">
+              <p className="text-zinc-400">History view coming soon...</p>
+              <p className="text-zinc-500 text-sm mt-2">Your search and price alert history will appear here.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Bottom Navigation */}
+        <nav className="block md:hidden fixed bottom-0 left-0 right-0 bg-zinc-800 border-t border-zinc-700 z-50 safe-bottom">
+          <div className="flex items-center justify-around h-16">
+            <button
+              onClick={() => setCurrentView('search')}
+              className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
+                currentView === 'search'
+                  ? 'text-blue-400'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className="text-2xl mb-1">🔍</span>
+              <span className="text-xs font-semibold">Search</span>
+            </button>
+            <button
+              onClick={() => setCurrentView('watchlist')}
+              className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
+                currentView === 'watchlist'
+                  ? 'text-purple-400'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className="text-2xl mb-1">🔔</span>
+              <span className="text-xs font-semibold">Watchlist</span>
+            </button>
+            <button
+              onClick={() => setCurrentView('history')}
+              className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
+                currentView === 'history'
+                  ? 'text-green-400'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className="text-2xl mb-1">📈</span>
+              <span className="text-xs font-semibold">History</span>
+            </button>
+          </div>
+        </nav>
       </div>
     </div>
   );
