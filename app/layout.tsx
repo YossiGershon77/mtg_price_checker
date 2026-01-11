@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import ServiceWorkerRegistration from "./components/ServiceWorkerRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,15 +18,6 @@ export const metadata: Metadata = {
   description: "Track Magic: The Gathering card prices across Scryfall and eBay",
 };
 
-useEffect(() => {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((reg) => console.log('Service Worker registered', reg))
-      .catch((err) => console.error('Service Worker failed', err));
-  }
-}, []);
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -36,6 +28,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <ServiceWorkerRegistration />
         {children}
       </body>
     </html>
