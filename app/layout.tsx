@@ -17,6 +17,15 @@ export const metadata: Metadata = {
   description: "Track Magic: The Gathering card prices across Scryfall and eBay",
 };
 
+useEffect(() => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => console.log('Service Worker registered', reg))
+      .catch((err) => console.error('Service Worker failed', err));
+  }
+}, []);
+
 export default function RootLayout({
   children,
 }: Readonly<{
