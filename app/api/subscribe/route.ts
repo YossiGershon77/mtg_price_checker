@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
+
+interface Subscription {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  createdAt?: string;
+}
 
 /**
  * POST /api/subscribe
- * Save push notification subscription
+ * Save push notification subscription to Upstash Redis
  */
 export async function POST(request: NextRequest) {
   try {
@@ -19,28 +29,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Read existing subscriptions or initialize empty array
-    const subscriptionsFile = path.join(process.cwd(), 'subscriptions.json');
-    let subscriptions: any[] = [];
-
-    try {
-      const data = await fs.readFile(subscriptionsFile, 'utf-8');
-      subscriptions = JSON.parse(data);
-    } catch (error: any) {
-      // File doesn't exist yet, start with empty array
-      if (error.code !== 'ENOENT') {
-        console.error('Error reading subscriptions file:', error);
-      }
+    if (!subscription.endpoint || !subscription.keys) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid subscription object' },
+        { status: 400 }
+      );
     }
 
-    // Add the new subscription (you might want to check for duplicates)
-    subscriptions.push({
+    // Get existing subscriptions from Redis
+    const subscriptions: Subscription[] = (await redis.get('subscriptions')) || [];
+
+    // Check if subscription already exists (by endpoint)
+    const existingIndex = subscriptions.findIndex(
+      sub => sub.endpoint === subscription.endpoint
+    );
+
+    const subscriptionWithTimestamp: Subscription = {
       ...subscription,
       createdAt: new Date().toISOString(),
-    });
+    };
 
-    // Save subscriptions to file
-    await fs.writeFile(subscriptionsFile, JSON.stringify(subscriptions, null, 2), 'utf-8');
+    if (existingIndex >= 0) {
+      // Update existing subscription
+      subscriptions[existingIndex] = subscriptionWithTimestamp;
+    } else {
+      // Add new subscription
+      subscriptions.push(subscriptionWithTimestamp);
+    }
+
+    // Save to Redis
+    await redis.set('subscriptions', subscriptions);
 
     return NextResponse.json({
       success: true,
@@ -57,6 +75,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-
-
